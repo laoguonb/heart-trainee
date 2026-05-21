@@ -455,31 +455,68 @@ function switchTab(tab) {
   else if(tab==='memory'){ $('memoryPage').classList.add('active'); $('tabMemory').classList.add('active'); renderMemories(); }
 }
 
-// ========== 音乐控制 ==========
+// ========== 音乐控制（增强版——防卡顿断播） ==========
 const bgMusic = document.getElementById('bgMusic');
 const ringtone = document.getElementById('ringtone');
 let musicEnabled = true;
+let bgmShouldPlay = false;
+let ringtoneShouldPlay = false;
+let musicHeartbeat = null;
+
+// 心跳监控：每2秒检查音乐是否还在播，断了就补
+function startHeartbeat() {
+  if (musicHeartbeat) return;
+  musicHeartbeat = setInterval(() => {
+    if (bgmShouldPlay && bgMusic.paused && musicEnabled) {
+      bgMusic.play().catch(() => {});
+    }
+    if (ringtoneShouldPlay && ringtone.paused && musicEnabled) {
+      ringtone.play().catch(() => {});
+    }
+  }, 2000);
+}
+
+// 预加载音频，确保缓冲足够
+function preloadAudio(audio) {
+  if (audio.readyState >= 3) return; // 已经够了
+  audio.load();
+  audio.preload = 'auto';
+}
 
 function startBGM() {
   if (!musicEnabled) return;
+  bgmShouldPlay = true;
+  ringtoneShouldPlay = false;
+  preloadAudio(bgMusic);
   bgMusic.volume = 0.25;
-  bgMusic.currentTime = 0;
-  bgMusic.play().catch(() => {});
+  // 从之前的位置继续，不要每次都从头来
+  bgMusic.play().catch(() => {
+    // 浏览器拦截了自动播放，等用户点击后补播
+    document.addEventListener('click', function retry() {
+      if (bgmShouldPlay) bgMusic.play().catch(() => {});
+    }, { once: true });
+  });
+  startHeartbeat();
 }
 
 function stopBGM() {
+  bgmShouldPlay = false;
   bgMusic.pause();
 }
 
 function playRingtone() {
   if (!musicEnabled) return;
   stopBGM();
+  ringtoneShouldPlay = true;
+  preloadAudio(ringtone);
   ringtone.volume = 0.6;
   ringtone.currentTime = 0;
   ringtone.play().catch(() => {});
+  startHeartbeat();
 }
 
 function stopRingtone() {
+  ringtoneShouldPlay = false;
   ringtone.pause();
   ringtone.currentTime = 0;
 }
@@ -487,6 +524,7 @@ function stopRingtone() {
 function resumeBGM() {
   stopRingtone();
   if (!musicEnabled) return;
+  bgmShouldPlay = true;
   bgMusic.play().catch(() => {});
 }
 
@@ -494,18 +532,23 @@ function playEndingMusic() {
   stopBGM();
   stopRingtone();
   if (!musicEnabled) return;
+  ringtoneShouldPlay = true;
+  preloadAudio(ringtone);
   ringtone.volume = 0.5;
   ringtone.currentTime = 0;
   ringtone.play().catch(() => {});
+  startHeartbeat();
 }
 
 function toggleMusic() {
   musicEnabled = !musicEnabled;
   if (musicEnabled) {
     if (S.callActive) playRingtone();
-    else startBGM();
+    else { bgmShouldPlay = true; bgMusic.play().catch(() => {}); }
     showToast('🔊 音乐已开启');
   } else {
+    bgmShouldPlay = false;
+    ringtoneShouldPlay = false;
     stopBGM();
     stopRingtone();
     showToast('🔇 音乐已关闭');
